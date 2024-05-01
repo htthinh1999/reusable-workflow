@@ -1,0 +1,122 @@
+name: CI Google Cloud Run
+
+on:
+  workflow_call:
+    inputs:
+      gcp_project_id:
+        required: true
+        type: string
+      gcp_docker_registry:
+        required: true
+        type: string
+      gcp_repository:
+        required: false
+        type: string
+        default: repository
+      docker_image_name:
+        required: true
+        type: string
+      docker_file:
+        required: true
+        type: string
+      cloud_run_name:
+        required: true
+        type: string
+      cloud_run_region:
+        required: true
+        type: string
+      cloud_run_deploy:
+        required: false
+        type: boolean
+        default: true
+      create_release:
+        required: false
+        type: boolean
+        default: true
+      hotfix:
+        required: false
+        type: boolean
+        default: false
+      environment:
+        required: false
+        type: string
+        default: staging
+    secrets:
+      GOOGLE_CREDENTIALS:
+        required: true
+
+jobs:
+  main:
+    runs-on: ubuntu-latest
+    environment: ${{ inputs.environment }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v2
+        with:
+          fetch-depth: "0"
+
+      - name: Bump version and push tag dry-run
+        if: inputs.hotfix == false
+        id: tag_version
+        uses: mathieudutour/github-tag-action@v5.1
+        with:
+          github_token: ${{ secrets.GITHUB_TOKEN }}
+          dry_run: true
+
+      - id: "auth"
+        uses: "google-github-actions/auth@v1"
+        with:
+          token_format: "access_token"
+          credentials_json: "${{ secrets.GOOGLE_CREDENTIALS }}"
+
+      - uses: "docker/login-action@v1"
+        with:
+          registry: ${{ inputs.gcp_docker_registry }}
+          username: "oauth2accesstoken"
+          password: "${{ steps.auth.outputs.access_token }}"
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Build and push Docker image with auto tag
+        if: inputs.hotfix == false
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ inputs.gcp_docker_registry }}/${{ inputs.gcp_project_id }}/${{ inputs.gcp_repository }}/${{ inputs.docker_image_name }}:${{ steps.tag_version.outputs.new_version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          file: ${{ inputs.docker_file }}
+
+      - name: Build and push Docker image with hotfix tag
+        if: inputs.hotfix == true
+        uses: docker/build-push-action@v5
+        with:
+          context: .
+          push: true
+          tags: |
+            ${{ inputs.gcp_docker_registry }}/${{ inputs.gcp_project_id }}/${{ inputs.gcp_repository }}/${{ inputs.docker_image_name }}:SNAPSHOT-${{ github.ref_name }}-${{github.run_number}}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+          file: ${{ inputs.docker_file }}
+
+      - id: "deploy"
+        name: Deploy Cloud Run
+        if: github.event_name == 'push' && inputs.cloud_run_deploy
+        uses: "google-github-actions/deploy-cloudrun@v1"
+        with:
+          service: ${{ inputs.cloud_run_name }}
+          image: "${{ inputs.gcp_docker_registry }}/${{ inputs.gcp_project_id }}/${{ inputs.gcp_repository }}/${{ inputs.docker_image_name }}:${{ steps.tag_version.outputs.new_version }}"
+          region: ${{ inputs.cloud_run_region }}
+
+      - name: Create Release
+        if: github.event_name == 'push' && inputs.create_release
+        uses: actions/create-release@v1
+        with:
+          tag_name: ${{ steps.tag_version.outputs.new_tag }}
+          release_name: ${{ steps.tag_version.outputs.new_tag }}
+          body: ${{ steps.tag_version.outputs.changelog }}
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
