@@ -41,6 +41,11 @@ on:
         required: false
         type: string
         default: staging
+      credetials_file:
+        required: false
+        type: boolean
+        default: false
+      
     secrets:
       GOOGLE_CREDENTIALS:
         required: true
@@ -89,6 +94,17 @@ jobs:
           cache-from: type=gha
           cache-to: type=gha,mode=max
           file: ${{ inputs.docker_file }}
+
+      - id: 'secrets'
+        if: inputs.credetials_file
+        uses: 'google-github-actions/get-secretmanager-secrets@v2'
+        with:
+          secrets: |-
+            credentials:keycode-mon/GOOGLE_CREDENTIALS
+
+      - if: inputs.credetials_file
+        run: |
+          echo -e "${{ steps.secrets.outputs.credentials }}" > credentials.json
 
       - name: Build and push Docker image with hotfix tag
         if: inputs.hotfix == true
