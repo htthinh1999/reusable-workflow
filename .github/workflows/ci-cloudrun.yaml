@@ -45,10 +45,6 @@ on:
         required: false
         type: boolean
         default: false
-      token_file:
-        required: false
-        type: boolean
-        default: false
       
     secrets:
       GOOGLE_CREDENTIALS:
@@ -89,10 +85,6 @@ jobs:
       - if: inputs.credentials_file
         run: |
           echo -e '${{ steps.secrets.outputs.credentials }}' > ./credentials.json
-
-      - if: inputs.token_file
-        run: |
-          echo -e '${{ steps.secrets.outputs.token }}' > ./token.json
 
       - uses: "docker/login-action@v1"
         with:
